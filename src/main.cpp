@@ -14,8 +14,14 @@ void setup() {
   oledBegin();
   // 串口打出一行，确认屏幕初始化已经走完
   Serial.println("Setup complete");
-  // 阻塞等待连上路由器，并记下第一笔信号格数
+  // 开始连路由器，但不等它。等的时候屏幕还要眨眼
   wifiLinkBegin();
+  while (wifiLinkBars() < 0) {
+    if (oledPoll()) {
+      oledShow(-1, false);
+    }
+    wifiLinkPoll();
+  }
   // 打开低功耗蓝牙从机，等安卓写入引脚指令
   btLinkBegin();
   // 用刚读到的格数再画一屏，右上角从叉变成信号条，左侧仍是未连接的空心点
@@ -24,9 +30,9 @@ void setup() {
 
 // setup 之后反复执行
 void loop() {
-  // 这一轮要不要整屏重画。眨眼、信号格或蓝牙连接变化时才置真
+  // 这一轮要不要整屏重画。表情、信号格或蓝牙连接变化时才置真
   bool needDraw = false;
-  // 到了闭眼、睁眼或 wink 的切换点
+  // 到了眨眼、wink、张望、思考、开心或难过的切换点
   if (oledPoll()) {
     needDraw = true;
   }

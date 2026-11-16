@@ -12,6 +12,8 @@ const char *wifiPassword = "88888888";
 const unsigned long rssiRefreshMs = 500;
 // 上一次读取信号的时刻，单位毫秒
 unsigned long lastRssiMs = 0;
+// 上一次在串口打印“连接中”的时刻。没连上时大约每秒打一次，不把画面卡住
+unsigned long lastWaitLogMs = 0;
 // 最近一次读到的信号强度，单位 dBm。越靠近 0 越强
 // 大约 -50 以内很强，-70 左右能正常用，-90 附近快断了
 int rssiDbm = 0;
@@ -79,34 +81,28 @@ void wifiLinkBegin() {
   WiFi.mode(WIFI_STA);
   // begin(名字, 密码, 信道, 路由器 MAC, 是否马上连)
   // 信道写 0 表示自动；MAC 写 NULL 表示不指定某一台路由器；tryConnect 为 true 会立刻开始连接
-  // 返回值是当时的 wl_status_t，刚调用时通常还不是 WL_CONNECTED，所以下面继续等
+  // 返回值是当时的 wl_status_t，刚调用时通常还不是 WL_CONNECTED。这里不等，让屏幕继续眨眼
   WiFi.begin(wifiSsid, wifiPassword);
-  // 没连上就每秒打一次状态码。WL_CONNECTED 的值是 3
-  while (WiFi.status() != WL_CONNECTED) {
-    // status() 无参数，取值见上面那一段
-    Serial.println("错误代码:" + String(WiFi.status()));
-    // delay(毫秒)：停住这么久。1000 就是 1 秒后再看一次
-    delay(1000);
-    Serial.println("连接WiFi中...");
-  }
-  Serial.println("WiFi连接成功");
-  // localIP() 无参数，返回本机 IP。toString() 无参数，转成可打印的文字
-  Serial.println("IP地址: " + WiFi.localIP().toString());
-  // 连上后马上读一次，不用等第一个 500 毫秒周期
-  rssiDbm = readRssiDbm();
-  // 记下当前格数。之后格数没变就不会为了同一次读数再画一屏
-  signalBars = rssiToBars(rssiDbm);
-  // 记下这一次的时间，下一轮从这里再数 500 毫秒
-  lastRssiMs = millis();
+  Serial.println("开始连接 WiFi");
+  // 让下一次 wifiLinkPoll 马上可以读信号，不用先空等 500 毫秒
+  lastRssiMs = 0;
 }
 
 bool wifiLinkPoll() {
+  unsigned long now = millis();
+  // 还没连上时大约每秒打一次状态。不使用 delay，眨眼计时才不会被停住
+  if (WiFi.status() != WL_CONNECTED && now - lastWaitLogMs >= 1000) {
+    lastWaitLogMs = now;
+    // status() 无参数。WL_CONNECTED 是 3，其他值表示还在找路由器或密码不对
+    Serial.println("错误代码:" + String(WiFi.status()));
+    Serial.println("连接WiFi中...");
+  }
   // 还没到采样间隔就什么都不做
-  if (millis() - lastRssiMs < rssiRefreshMs) {
+  if (now - lastRssiMs < rssiRefreshMs) {
     return false;
   }
   // 重新计时
-  lastRssiMs = millis();
+  lastRssiMs = now;
   // 先沿用上次的 dBm。没连上时不把 0 写进去，否则重连前会变成满格
   int latestDbm = rssiDbm;
   // -1 表示这一次读下来仍是未连接
@@ -122,9 +118,16 @@ bool wifiLinkPoll() {
   }
   // 格数或连接状态和画面上不一致，才需要整屏重画
   bool lookChanged = latestBars != signalBars;
+  // 这一轮是不是刚从断线变成连上
+  bool becameUp = latestBars >= 0 && signalBars < 0;
   // 记下这一次的读数，下次用来比较
   rssiDbm = latestDbm;
   signalBars = latestBars;
+  if (becameUp) {
+    Serial.println("WiFi连接成功");
+    // localIP() 无参数，返回本机 IP。toString() 无参数，转成可打印的文字
+    Serial.println("IP地址: " + WiFi.localIP().toString());
+  }
   // 未连接只打一句。连上了同时打出 dBm 和格数，方便对照门槛
   if (latestBars < 0) {
     Serial.println("WiFi 未连接");
